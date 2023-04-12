@@ -192,8 +192,6 @@ include(":extensions:data-plane-selector:store:cosmos:data-plane-instance-store-
 include(":launchers:data-plane-server")
 include(":launchers:dpf-selector")
 include(":launchers:ids-connector")
-include(":launchers:data-factory-sample:provider")
-include(":launchers:data-factory-sample:consumer")
 
 // extension points for a connector ----------------------------------------------------------------
 include(":spi:common:auth-spi")

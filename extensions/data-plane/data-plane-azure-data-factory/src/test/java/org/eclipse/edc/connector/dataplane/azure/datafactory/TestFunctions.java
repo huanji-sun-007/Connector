@@ -15,12 +15,10 @@
 package org.eclipse.edc.connector.dataplane.azure.datafactory;
 
 import org.eclipse.edc.azure.blob.AzureBlobStoreSchema;
-import org.eclipse.edc.ms.dataverse.MicrosoftDataverseSchema;
 import org.eclipse.edc.spi.types.domain.DataAddress;
 import org.eclipse.edc.spi.types.domain.transfer.DataFlowRequest;
 
 import java.util.Map;
-import java.util.UUID;
 
 import static org.eclipse.edc.azure.blob.testfixtures.AzureStorageTestFixtures.createAccountName;
 import static org.eclipse.edc.azure.blob.testfixtures.AzureStorageTestFixtures.createBlobName;
@@ -48,17 +46,10 @@ public class TestFunctions {
                 DataAddress.KEY_NAME, destStorageAccount + "-key1");
     }
 
-    public static DataFlowRequest createBlobToBlobRequest() {
+    public static DataFlowRequest createFlowRequest() {
         return createRequest(AzureBlobStoreSchema.TYPE)
                 .sourceDataAddress(createDataAddress(AzureBlobStoreSchema.TYPE).properties(sourceProperties()).build())
                 .destinationDataAddress(createDataAddress(AzureBlobStoreSchema.TYPE).properties(destinationProperties()).build())
                 .build();
-    }
-    public static DataFlowRequest createBlobToDataverseRequest() {
-        return DataFlowRequest.Builder.newInstance()
-                .id(UUID.randomUUID().toString())
-                .processId(UUID.randomUUID().toString())
-                .sourceDataAddress(createDataAddress(AzureBlobStoreSchema.TYPE).build())
-                .destinationDataAddress(createDataAddress(MicrosoftDataverseSchema.TYPE).build()).build();
     }
 }
