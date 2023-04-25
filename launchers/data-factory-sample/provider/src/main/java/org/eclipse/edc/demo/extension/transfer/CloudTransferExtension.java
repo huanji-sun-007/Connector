@@ -57,7 +57,7 @@ public class CloudTransferExtension implements ServiceExtension {
                 .type("AzureStorage")
                 .property("account", "edcproviderstore")
                 .property("container", "provider")
-                .property("blobname", "huanhuantests.csv")
+                .property("blobname", "fugitive-emissions.csv")
                 .keyName("provider-shared-key")
                 .build();
         assetIndex.accept(asset, dataAddress);
