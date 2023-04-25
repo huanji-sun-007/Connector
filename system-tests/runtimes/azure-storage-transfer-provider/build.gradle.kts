@@ -16,13 +16,14 @@
 plugins {
     `java-library`
     id("application")
-    id("com.github.johnrengelman.shadow") version "8.1.1"
+    alias(libs.plugins.shadow)
 }
 
 dependencies {
     implementation(project(":core:common:util"))
 
     implementation(project(":core:control-plane:control-plane-core"))
+    implementation(project(":core:data-plane-selector:data-plane-selector-core"))
     implementation(project(":core:data-plane:data-plane-core"))
 
     implementation(project(":extensions:control-plane:transfer:transfer-data-plane"))

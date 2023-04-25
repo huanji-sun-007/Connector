@@ -14,15 +14,17 @@
 
 package org.eclipse.edc.connector.service.contractdefinition;
 
+import org.eclipse.edc.catalog.spi.DataService;
+import org.eclipse.edc.connector.contract.spi.event.contractdefinition.ContractDefinitionCreated;
+import org.eclipse.edc.connector.contract.spi.event.contractdefinition.ContractDefinitionDeleted;
+import org.eclipse.edc.connector.contract.spi.event.contractdefinition.ContractDefinitionEvent;
 import org.eclipse.edc.connector.contract.spi.types.offer.ContractDefinition;
+import org.eclipse.edc.connector.dataplane.selector.spi.store.DataPlaneInstanceStore;
 import org.eclipse.edc.connector.spi.contractdefinition.ContractDefinitionService;
 import org.eclipse.edc.junit.extensions.EdcExtension;
 import org.eclipse.edc.spi.asset.AssetSelectorExpression;
 import org.eclipse.edc.spi.event.EventRouter;
 import org.eclipse.edc.spi.event.EventSubscriber;
-import org.eclipse.edc.spi.event.contractdefinition.ContractDefinitionCreated;
-import org.eclipse.edc.spi.event.contractdefinition.ContractDefinitionDeleted;
-import org.eclipse.edc.spi.event.contractdefinition.ContractDefinitionEvent;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -44,6 +46,8 @@ public class ContractDefinitionEventDispatchTest {
 
     @BeforeEach
     void setUp(EdcExtension extension) {
+        extension.registerServiceMock(DataService.class, mock(DataService.class));
+        extension.registerServiceMock(DataPlaneInstanceStore.class, mock(DataPlaneInstanceStore.class));
         extension.setConfiguration(Map.of(
                 "web.http.port", String.valueOf(getFreePort()),
                 "web.http.path", "/api"

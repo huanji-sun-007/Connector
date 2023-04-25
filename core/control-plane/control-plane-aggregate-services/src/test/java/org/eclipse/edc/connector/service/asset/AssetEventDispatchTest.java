@@ -14,6 +14,8 @@
 
 package org.eclipse.edc.connector.service.asset;
 
+import org.eclipse.edc.catalog.spi.DataService;
+import org.eclipse.edc.connector.dataplane.selector.spi.store.DataPlaneInstanceStore;
 import org.eclipse.edc.connector.spi.asset.AssetService;
 import org.eclipse.edc.junit.extensions.EdcExtension;
 import org.eclipse.edc.spi.event.EventRouter;
@@ -33,7 +35,6 @@ import static org.awaitility.Awaitility.await;
 import static org.eclipse.edc.junit.matchers.EventEnvelopeMatcher.isEnvelopeOf;
 import static org.eclipse.edc.junit.testfixtures.TestUtils.getFreePort;
 import static org.mockito.ArgumentMatchers.argThat;
-import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 
@@ -44,6 +45,8 @@ public class AssetEventDispatchTest {
 
     @BeforeEach
     void setUp(EdcExtension extension) {
+        extension.registerServiceMock(DataService.class, mock(DataService.class));
+        extension.registerServiceMock(DataPlaneInstanceStore.class, mock(DataPlaneInstanceStore.class));
         extension.setConfiguration(Map.of(
                 "web.http.port", String.valueOf(getFreePort()),
                 "web.http.path", "/api"
@@ -52,10 +55,6 @@ public class AssetEventDispatchTest {
 
     @Test
     void shouldDispatchEventsOnAssetCreationAndDeletion(AssetService service, EventRouter eventRouter) {
-
-        doAnswer(i -> null).when(eventSubscriber).on(argThat(isEnvelopeOf(AssetCreated.class)));
-        doAnswer(i -> null).when(eventSubscriber).on(argThat(isEnvelopeOf(AssetDeleted.class)));
-
         eventRouter.register(AssetEvent.class, eventSubscriber);
         var asset = Asset.Builder.newInstance().id("assetId").build();
         var dataAddress = DataAddress.Builder.newInstance().type("any").build();

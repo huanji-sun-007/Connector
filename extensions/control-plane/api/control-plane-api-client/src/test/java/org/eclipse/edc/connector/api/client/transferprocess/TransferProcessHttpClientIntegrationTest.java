@@ -14,6 +14,7 @@
 
 package org.eclipse.edc.connector.api.client.transferprocess;
 
+import org.eclipse.edc.catalog.spi.DataService;
 import org.eclipse.edc.connector.dataplane.spi.manager.DataPlaneManager;
 import org.eclipse.edc.connector.dataplane.spi.pipeline.TransferService;
 import org.eclipse.edc.connector.dataplane.spi.registry.TransferServiceRegistry;
@@ -22,6 +23,7 @@ import org.eclipse.edc.connector.transfer.spi.store.TransferProcessStore;
 import org.eclipse.edc.connector.transfer.spi.types.DataRequest;
 import org.eclipse.edc.connector.transfer.spi.types.TransferProcess;
 import org.eclipse.edc.connector.transfer.spi.types.TransferProcessStates;
+import org.eclipse.edc.junit.annotations.ComponentTest;
 import org.eclipse.edc.junit.extensions.EdcExtension;
 import org.eclipse.edc.runtime.metamodel.annotation.Inject;
 import org.eclipse.edc.spi.EdcException;
@@ -40,9 +42,9 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import java.net.URL;
 import java.util.Map;
 import java.util.UUID;
-import java.util.concurrent.CompletableFuture;
 
 import static java.util.concurrent.CompletableFuture.completedFuture;
+import static java.util.concurrent.CompletableFuture.failedFuture;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.awaitility.Awaitility.await;
 import static org.eclipse.edc.connector.transfer.spi.types.TransferProcessStates.COMPLETED;
@@ -53,6 +55,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(EdcExtension.class)
+@ComponentTest
 public class TransferProcessHttpClientIntegrationTest {
 
     private final int port = getFreePort();
@@ -70,6 +73,7 @@ public class TransferProcessHttpClientIntegrationTest {
         ));
 
         extension.registerSystemExtension(ServiceExtension.class, new TransferServiceMockExtension(service));
+        extension.registerServiceMock(DataService.class, mock(DataService.class));
         var registry = mock(RemoteMessageDispatcherRegistry.class);
         when(registry.send(any(), any())).thenReturn(completedFuture("any"));
         extension.registerServiceMock(RemoteMessageDispatcherRegistry.class, registry);
@@ -80,7 +84,9 @@ public class TransferProcessHttpClientIntegrationTest {
         when(service.transfer(any())).thenReturn(completedFuture(StatusResult.success()));
         var id = "tp-id";
         store.save(createTransferProcess(id));
-        manager.initiateTransfer(createDataFlowRequest(id, callbackUrl.get()));
+        var dataFlowRequest = createDataFlowRequest(id, callbackUrl.get());
+
+        manager.initiateTransfer(dataFlowRequest);
 
         await().untilAsserted(() -> {
             var transferProcess = store.find("tp-id");
@@ -94,7 +100,9 @@ public class TransferProcessHttpClientIntegrationTest {
         when(service.transfer(any())).thenReturn(completedFuture(StatusResult.failure(ResponseStatus.FATAL_ERROR, "error")));
         var id = "tp-id";
         store.save(createTransferProcess(id));
-        manager.initiateTransfer(createDataFlowRequest(id, callbackUrl.get()));
+        var dataFlowRequest = createDataFlowRequest(id, callbackUrl.get());
+
+        manager.initiateTransfer(dataFlowRequest);
 
         await().untilAsserted(() -> {
             var transferProcess = store.find("tp-id");
@@ -107,10 +115,12 @@ public class TransferProcessHttpClientIntegrationTest {
 
     @Test
     void shouldCallTransferProcessApiWithException(TransferProcessStore store, DataPlaneManager manager, ControlPlaneApiUrl callbackUrl) {
-        when(service.transfer(any())).thenReturn(CompletableFuture.failedFuture(new EdcException("error")));
+        when(service.transfer(any())).thenReturn(failedFuture(new EdcException("error")));
         var id = "tp-id";
         store.save(createTransferProcess(id));
-        manager.initiateTransfer(createDataFlowRequest(id, callbackUrl.get()));
+        var dataFlowRequest = createDataFlowRequest(id, callbackUrl.get());
+
+        manager.initiateTransfer(dataFlowRequest);
 
         await().untilAsserted(() -> {
             var transferProcess = store.find("tp-id");
@@ -127,6 +137,7 @@ public class TransferProcessHttpClientIntegrationTest {
                 .state(TransferProcessStates.STARTED.code())
                 .type(TransferProcess.Type.PROVIDER)
                 .dataRequest(DataRequest.Builder.newInstance()
+                        .id(UUID.randomUUID().toString())
                         .destinationType("file")
                         .protocol("any")
                         .connectorAddress("http://an/address")
@@ -147,6 +158,7 @@ public class TransferProcessHttpClientIntegrationTest {
     private static class TransferServiceMockExtension implements ServiceExtension {
 
         private final TransferService transferService;
+
         @Inject
         private TransferServiceRegistry registry;
 
@@ -159,4 +171,5 @@ public class TransferProcessHttpClientIntegrationTest {
             registry.registerTransferService(transferService);
         }
     }
+
 }

@@ -15,12 +15,13 @@
 package org.eclipse.edc.connector.service.contractnegotiation;
 
 import org.eclipse.edc.connector.contract.spi.negotiation.ConsumerContractNegotiationManager;
+import org.eclipse.edc.connector.contract.spi.negotiation.ProviderContractNegotiationManager;
 import org.eclipse.edc.connector.contract.spi.negotiation.store.ContractNegotiationStore;
 import org.eclipse.edc.connector.contract.spi.types.agreement.ContractAgreement;
 import org.eclipse.edc.connector.contract.spi.types.command.CancelNegotiationCommand;
 import org.eclipse.edc.connector.contract.spi.types.command.DeclineNegotiationCommand;
 import org.eclipse.edc.connector.contract.spi.types.negotiation.ContractNegotiation;
-import org.eclipse.edc.connector.contract.spi.types.negotiation.ContractOfferRequest;
+import org.eclipse.edc.connector.contract.spi.types.negotiation.ContractRequestMessage;
 import org.eclipse.edc.connector.contract.spi.types.negotiation.command.ContractNegotiationCommand;
 import org.eclipse.edc.connector.contract.spi.types.offer.ContractOffer;
 import org.eclipse.edc.policy.model.Policy;
@@ -40,7 +41,7 @@ import java.util.UUID;
 import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.eclipse.edc.connector.contract.spi.types.negotiation.ContractNegotiationStates.CONSUMER_REQUESTED;
+import static org.eclipse.edc.connector.contract.spi.types.negotiation.ContractNegotiationStates.REQUESTED;
 import static org.eclipse.edc.service.spi.result.ServiceFailure.Reason.NOT_FOUND;
 import static org.mockito.AdditionalMatchers.and;
 import static org.mockito.ArgumentMatchers.any;
@@ -55,9 +56,10 @@ import static org.mockito.Mockito.when;
 class ContractNegotiationServiceImplTest {
 
     private final ContractNegotiationStore store = mock(ContractNegotiationStore.class);
-    private final ConsumerContractNegotiationManager manager = mock(ConsumerContractNegotiationManager.class);
+    private final ConsumerContractNegotiationManager consumerManager = mock(ConsumerContractNegotiationManager.class);
+    private final ProviderContractNegotiationManager providerManager = mock(ProviderContractNegotiationManager.class);
     private final TransactionContext transactionContext = new NoopTransactionContext();
-    private final ContractNegotiationServiceImpl service = new ContractNegotiationServiceImpl(store, manager, transactionContext);
+    private final ContractNegotiationServiceImpl service = new ContractNegotiationServiceImpl(store, consumerManager, transactionContext);
 
     @Test
     void findById_filtersById() {
@@ -121,13 +123,13 @@ class ContractNegotiationServiceImplTest {
     @Test
     void getState_returnsStringRepresentation() {
         var negotiation = createContractNegotiationBuilder("negotiationId")
-                .state(CONSUMER_REQUESTED.code())
+                .state(REQUESTED.code())
                 .build();
         when(store.findById("negotiationId")).thenReturn(negotiation);
 
         var result = service.getState("negotiationId");
 
-        assertThat(result).isEqualTo(CONSUMER_REQUESTED.name());
+        assertThat(result).isEqualTo(REQUESTED.name());
     }
 
     @Test
@@ -187,18 +189,12 @@ class ContractNegotiationServiceImplTest {
     @Test
     void initiateNegotiation_callsManager() {
         var contractNegotiation = createContractNegotiation("negotiationId");
-        when(manager.initiate(isA(ContractOfferRequest.class))).thenReturn(StatusResult.success(contractNegotiation));
-        var request = ContractOfferRequest.Builder.newInstance()
+        when(consumerManager.initiate(isA(ContractRequestMessage.class))).thenReturn(StatusResult.success(contractNegotiation));
+        var request = ContractRequestMessage.Builder.newInstance()
                 .connectorId("connectorId")
-                .connectorAddress("address")
+                .callbackAddress("address")
                 .protocol("protocol")
-                .contractOffer(ContractOffer.Builder.newInstance()
-                        .id(UUID.randomUUID().toString())
-                        .policy(Policy.Builder.newInstance().build())
-                        .asset(Asset.Builder.newInstance().id("test-asset").build())
-                        .contractStart(ZonedDateTime.now())
-                        .contractEnd(ZonedDateTime.now())
-                        .build())
+                .contractOffer(createContractOffer())
                 .build();
 
         var result = service.initiateNegotiation(request);
@@ -215,7 +211,7 @@ class ContractNegotiationServiceImplTest {
 
         assertThat(result.succeeded()).isTrue();
         assertThat(result.getContent()).matches(it -> it.getId().equals("negotiationId"));
-        verify(manager).enqueueCommand(argThat(isCancelNegotiationCommandWithNegotiationId("negotiationId")));
+        verify(consumerManager).enqueueCommand(argThat(isCancelNegotiationCommandWithNegotiationId("negotiationId")));
     }
 
     @Test
@@ -226,19 +222,19 @@ class ContractNegotiationServiceImplTest {
 
         assertThat(result.succeeded()).isFalse();
         assertThat(result.reason()).isEqualTo(NOT_FOUND);
-        verifyNoInteractions(manager);
+        verifyNoInteractions(consumerManager);
     }
 
     @Test
     void decline_shouldSucceedIfManagerIsBeingAbleToDeclineIt() {
-        var negotiation = createContractNegotiationBuilder("negotiationId").state(CONSUMER_REQUESTED.code()).build();
+        var negotiation = createContractNegotiationBuilder("negotiationId").state(REQUESTED.code()).build();
         when(store.findById("negotiationId")).thenReturn(negotiation);
 
         var result = service.decline("negotiationId");
 
         assertThat(result.succeeded()).isTrue();
         assertThat(result.getContent()).matches(it -> it.getId().equals("negotiationId"));
-        verify(manager).enqueueCommand(and(isA(DeclineNegotiationCommand.class), argThat(it -> "negotiationId".equals(it.getNegotiationId()))));
+        verify(consumerManager).enqueueCommand(and(isA(DeclineNegotiationCommand.class), argThat(it -> "negotiationId".equals(it.getNegotiationId()))));
     }
 
     @Test
@@ -249,7 +245,7 @@ class ContractNegotiationServiceImplTest {
 
         assertThat(result.succeeded()).isFalse();
         assertThat(result.reason()).isEqualTo(NOT_FOUND);
-        verifyNoInteractions(manager);
+        verifyNoInteractions(consumerManager);
     }
 
     @NotNull
@@ -278,5 +274,15 @@ class ContractNegotiationServiceImplTest {
                 .counterPartyId(UUID.randomUUID().toString())
                 .counterPartyAddress("address")
                 .protocol("protocol");
+    }
+
+    private ContractOffer createContractOffer() {
+        return ContractOffer.Builder.newInstance()
+                .id(UUID.randomUUID().toString())
+                .policy(Policy.Builder.newInstance().build())
+                .asset(Asset.Builder.newInstance().id("test-asset").build())
+                .contractStart(ZonedDateTime.now())
+                .contractEnd(ZonedDateTime.now())
+                .build();
     }
 }

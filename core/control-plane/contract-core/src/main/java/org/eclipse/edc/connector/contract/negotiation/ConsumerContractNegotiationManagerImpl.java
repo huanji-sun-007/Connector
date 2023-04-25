@@ -12,6 +12,7 @@
  *       Fraunhofer Institute for Software and Systems Engineering - extended method implementation
  *       Daimler TSS GmbH - fixed contract dates to epoch seconds
  *       Bayerische Motoren Werke Aktiengesellschaft (BMW AG) - refactor
+ *       ZF Friedrichshafen AG - fixed contract validity issue
  *
  */
 
@@ -21,15 +22,13 @@ import io.opentelemetry.extension.annotations.WithSpan;
 import org.eclipse.edc.connector.contract.spi.ContractId;
 import org.eclipse.edc.connector.contract.spi.negotiation.ConsumerContractNegotiationManager;
 import org.eclipse.edc.connector.contract.spi.types.agreement.ContractAgreement;
-import org.eclipse.edc.connector.contract.spi.types.agreement.ContractAgreementRequest;
+import org.eclipse.edc.connector.contract.spi.types.agreement.ContractAgreementMessage;
 import org.eclipse.edc.connector.contract.spi.types.agreement.ContractAgreementVerificationMessage;
 import org.eclipse.edc.connector.contract.spi.types.negotiation.ContractNegotiation;
 import org.eclipse.edc.connector.contract.spi.types.negotiation.ContractNegotiationStates;
-import org.eclipse.edc.connector.contract.spi.types.negotiation.ContractOfferRequest;
-import org.eclipse.edc.connector.contract.spi.types.negotiation.ContractRejection;
+import org.eclipse.edc.connector.contract.spi.types.negotiation.ContractNegotiationTerminationMessage;
+import org.eclipse.edc.connector.contract.spi.types.negotiation.ContractRequestMessage;
 import org.eclipse.edc.connector.contract.spi.types.negotiation.command.ContractNegotiationCommand;
-import org.eclipse.edc.policy.model.Policy;
-import org.eclipse.edc.spi.iam.ClaimToken;
 import org.eclipse.edc.spi.response.StatusResult;
 import org.eclipse.edc.statemachine.StateMachineManager;
 import org.eclipse.edc.statemachine.StateProcessorImpl;
@@ -39,20 +38,18 @@ import java.util.function.Function;
 
 import static java.lang.String.format;
 import static org.eclipse.edc.connector.contract.spi.types.negotiation.ContractNegotiation.Type.CONSUMER;
-import static org.eclipse.edc.connector.contract.spi.types.negotiation.ContractNegotiationStates.CONSUMER_AGREEING;
-import static org.eclipse.edc.connector.contract.spi.types.negotiation.ContractNegotiationStates.CONSUMER_REQUESTING;
-import static org.eclipse.edc.connector.contract.spi.types.negotiation.ContractNegotiationStates.CONSUMER_VERIFYING;
+import static org.eclipse.edc.connector.contract.spi.types.negotiation.ContractNegotiationStates.ACCEPTING;
+import static org.eclipse.edc.connector.contract.spi.types.negotiation.ContractNegotiationStates.AGREED;
 import static org.eclipse.edc.connector.contract.spi.types.negotiation.ContractNegotiationStates.INITIAL;
-import static org.eclipse.edc.connector.contract.spi.types.negotiation.ContractNegotiationStates.PROVIDER_AGREED;
+import static org.eclipse.edc.connector.contract.spi.types.negotiation.ContractNegotiationStates.REQUESTING;
 import static org.eclipse.edc.connector.contract.spi.types.negotiation.ContractNegotiationStates.TERMINATING;
-import static org.eclipse.edc.spi.response.ResponseStatus.FATAL_ERROR;
+import static org.eclipse.edc.connector.contract.spi.types.negotiation.ContractNegotiationStates.VERIFYING;
 
 /**
  * Implementation of the {@link ConsumerContractNegotiationManager}.
  */
 public class ConsumerContractNegotiationManagerImpl extends AbstractContractNegotiationManager implements ConsumerContractNegotiationManager {
 
-    private static final String TYPE = "Consumer";
     private StateMachineManager stateMachineManager;
 
     private ConsumerContractNegotiationManagerImpl() {
@@ -61,10 +58,10 @@ public class ConsumerContractNegotiationManagerImpl extends AbstractContractNego
     public void start() {
         stateMachineManager = StateMachineManager.Builder.newInstance("consumer-contract-negotiation", monitor, executorInstrumentation, waitStrategy)
                 .processor(processNegotiationsInState(INITIAL, this::processInitial))
-                .processor(processNegotiationsInState(CONSUMER_REQUESTING, this::processRequesting))
-                .processor(processNegotiationsInState(CONSUMER_AGREEING, this::processConsumerApproving))
-                .processor(processNegotiationsInState(PROVIDER_AGREED, this::processProviderAgreed))
-                .processor(processNegotiationsInState(CONSUMER_VERIFYING, this::processConsumerVerifying))
+                .processor(processNegotiationsInState(REQUESTING, this::processRequesting))
+                .processor(processNegotiationsInState(ACCEPTING, this::processAccepting))
+                .processor(processNegotiationsInState(AGREED, this::processAgreed))
+                .processor(processNegotiationsInState(VERIFYING, this::processVerifying))
                 .processor(processNegotiationsInState(TERMINATING, this::processTerminating))
                 .processor(onCommands(this::processCommand))
                 .build();
@@ -87,12 +84,14 @@ public class ConsumerContractNegotiationManagerImpl extends AbstractContractNego
      */
     @WithSpan
     @Override
-    public StatusResult<ContractNegotiation> initiate(ContractOfferRequest contractOffer) {
+    public StatusResult<ContractNegotiation> initiate(ContractRequestMessage contractOffer) {
+        var id = UUID.randomUUID().toString();
         var negotiation = ContractNegotiation.Builder.newInstance()
-                .id(UUID.randomUUID().toString())
+                .id(id)
+                .correlationId(id)
                 .protocol(contractOffer.getProtocol())
                 .counterPartyId(contractOffer.getConnectorId())
-                .counterPartyAddress(contractOffer.getConnectorAddress())
+                .counterPartyAddress(contractOffer.getCallbackAddress())
                 .traceContext(telemetry.getCurrentTraceContext())
                 .type(CONSUMER)
                 .build();
@@ -103,95 +102,9 @@ public class ConsumerContractNegotiationManagerImpl extends AbstractContractNego
         return StatusResult.success(negotiation);
     }
 
-    /**
-     * Tells this manager that a previously sent contract offer has been agreed by the provider. Validates the
-     * contract agreement sent by the provider against the last contract offer and transitions the corresponding
-     * {@link ContractNegotiation} to state AGREED or TERMINATING.
-     *
-     * @param token Claim token of the provider that sent the contract request.
-     * @param negotiationId Id of the ContractNegotiation.
-     * @param agreement Agreement sent by provider.
-     * @param policy the policy
-     * @return a {@link StatusResult}: FATAL_ERROR, if no match found for Id or no last offer found for negotiation; OK otherwise
-     */
-    @WithSpan
-    @Override
-    // TODO: should be renamed to agreed
-    public StatusResult<ContractNegotiation> confirmed(ClaimToken token, String negotiationId, ContractAgreement agreement, Policy policy) {
-        var negotiation = negotiationStore.findById(negotiationId);
-        if (negotiation == null) {
-            return StatusResult.failure(FATAL_ERROR, format("ContractNegotiation with id %s not found", negotiationId));
-        }
-
-        var latestOffer = negotiation.getLastContractOffer();
-        if (latestOffer == null) {
-            monitor.severe("[Consumer] No offer found for validation. Process id: " + negotiation.getId());
-            return StatusResult.failure(FATAL_ERROR);
-        }
-
-        var result = validationService.validateConfirmed(token, agreement, latestOffer);
-        if (result.failed()) {
-            var message = "Contract agreement received. Validation failed: " + result.getFailureDetail();
-            monitor.debug("[Consumer] " + message);
-            return StatusResult.failure(FATAL_ERROR);
-        }
-
-        monitor.debug("[Consumer] Contract agreement received. Validation successful.");
-        transitionToProviderAgreed(negotiation, agreement);
-
-        return StatusResult.success(negotiation);
-    }
-
-    @Override
-    public StatusResult<ContractNegotiation> finalized(ClaimToken token, String negotiationId) {
-        var negotiation = negotiationStore.findById(negotiationId);
-        if (negotiation == null) {
-            return StatusResult.failure(FATAL_ERROR, format("ContractNegotiation with id %s not found", negotiationId));
-        }
-
-        var result = validationService.validateRequest(token, negotiation);
-        if (result.failed()) {
-            return StatusResult.failure(FATAL_ERROR, "Invalid provider credentials");
-        }
-
-        transitionToProviderFinalized(negotiation);
-        return StatusResult.success(negotiation);
-    }
-
-    /**
-     * Tells this manager that a {@link ContractNegotiation} has been declined by the counter-party. Transitions the
-     * corresponding ContractNegotiation to state DECLINED.
-     *
-     * @param token Claim token of the consumer that sent the rejection.
-     * @param negotiationId Id of the ContractNegotiation.
-     * @return a {@link StatusResult}: OK, if successfully transitioned to declined; FATAL_ERROR, if no match found for id.
-     */
-    @WithSpan
-    @Override
-    public StatusResult<ContractNegotiation> declined(ClaimToken token, String negotiationId) {
-        var negotiation = findContractNegotiationById(negotiationId);
-        if (negotiation == null) {
-            return StatusResult.failure(FATAL_ERROR);
-        }
-
-        var result = validationService.validateRequest(token, negotiation);
-        if (result.failed()) {
-            return StatusResult.failure(FATAL_ERROR, "Invalid provider credentials");
-        }
-
-        monitor.debug("[Consumer] Contract rejection received. Abort negotiation process.");
-        transitionToTerminated(negotiation);
-        return StatusResult.success(negotiation);
-    }
-
     @Override
     public void enqueueCommand(ContractNegotiationCommand command) {
         commandQueue.enqueue(command);
-    }
-
-    @Override
-    protected String getType() {
-        return TYPE;
     }
 
     private ContractNegotiation findContractNegotiationById(String negotiationId) {
@@ -210,7 +123,7 @@ public class ConsumerContractNegotiationManagerImpl extends AbstractContractNego
      */
     @WithSpan
     private boolean processInitial(ContractNegotiation negotiation) {
-        transitionToConsumerRequesting(negotiation);
+        transitionToRequesting(negotiation);
         return true;
     }
 
@@ -224,34 +137,34 @@ public class ConsumerContractNegotiationManagerImpl extends AbstractContractNego
     @WithSpan
     private boolean processRequesting(ContractNegotiation negotiation) {
         var offer = negotiation.getLastContractOffer();
-        var request = ContractOfferRequest.Builder.newInstance() // TODO: should be renamed to ContractRequestMessage
+        var request = ContractRequestMessage.Builder.newInstance()
                 .contractOffer(offer)
-                .connectorAddress(negotiation.getCounterPartyAddress())
+                .callbackAddress(negotiation.getCounterPartyAddress())
                 .protocol(negotiation.getProtocol())
                 .connectorId(negotiation.getCounterPartyId())
-                .correlationId(negotiation.getId())
-                .type(ContractOfferRequest.Type.INITIAL)
+                .processId(negotiation.getId())
+                .type(ContractRequestMessage.Type.INITIAL)
                 .build();
 
         return entityRetryProcessFactory.doAsyncProcess(negotiation, () -> dispatcherRegistry.send(Object.class, request))
                 .entityRetrieve(negotiationStore::findById)
                 .onDelay(this::breakLease)
-                .onSuccess((n, result) -> transitionToConsumerRequested(n))
-                .onFailure((n, throwable) -> transitionToConsumerRequesting(n))
+                .onSuccess((n, result) -> transitionToRequested(n))
+                .onFailure((n, throwable) -> transitionToRequesting(n))
                 .onRetryExhausted((n, throwable) -> transitionToTerminating(n, format("Failed to send %s to provider: %s", request.getClass().getSimpleName(), throwable.getMessage())))
                 .execute("[Consumer] Send ContractRequestMessage message");
     }
 
     /**
-     * Processes {@link ContractNegotiation} in state CONSUMER_APPROVING. Tries to send a dummy contract agreement to
+     * Processes {@link ContractNegotiation} in state ACCEPTING. Tries to send a dummy contract agreement to
      * the respective provider in order to approve the last offer sent by the provider. If this succeeds, the
-     * ContractNegotiation is transitioned to state CONSUMER_APPROVED. Else, it is transitioned to CONSUMER_APPROVING
+     * ContractNegotiation is transitioned to state ACCEPTED. Else, it is transitioned to ACCEPTING
      * for a retry.
      *
      * @return true if processed, false otherwise
      */
     @WithSpan
-    private boolean processConsumerApproving(ContractNegotiation negotiation) {
+    private boolean processAccepting(ContractNegotiation negotiation) {
         var lastOffer = negotiation.getLastContractOffer();
 
         var contractId = ContractId.parse(lastOffer.getId());
@@ -264,7 +177,7 @@ public class ConsumerContractNegotiationManagerImpl extends AbstractContractNego
         var policy = lastOffer.getPolicy();
         var agreement = ContractAgreement.Builder.newInstance()
                 .id(ContractId.createContractId(definitionId))
-                .contractStartDate(clock.instant().getEpochSecond())
+                .contractStartDate(lastOffer.getContractStart().toEpochSecond())
                 .contractEndDate(lastOffer.getContractEnd().toEpochSecond())
                 .contractSigningDate(clock.instant().getEpochSecond())
                 .providerAgentId(String.valueOf(lastOffer.getProvider()))
@@ -273,61 +186,61 @@ public class ConsumerContractNegotiationManagerImpl extends AbstractContractNego
                 .assetId(lastOffer.getAsset().getId())
                 .build();
 
-        var request = ContractAgreementRequest.Builder.newInstance()
+        var request = ContractAgreementMessage.Builder.newInstance()
                 .protocol(negotiation.getProtocol())
                 .connectorId(negotiation.getCounterPartyId())
-                .connectorAddress(negotiation.getCounterPartyAddress())
+                .callbackAddress(negotiation.getCounterPartyAddress())
                 .contractAgreement(agreement)
-                .correlationId(negotiation.getId())
+                .processId(negotiation.getId())
                 .policy(policy)
                 .build();
 
         return entityRetryProcessFactory.doAsyncProcess(negotiation, () -> dispatcherRegistry.send(Object.class, request))
                 .entityRetrieve(negotiationStore::findById)
                 .onDelay(this::breakLease)
-                .onSuccess((n, result) -> transitionToConsumerAgreed(n))
-                .onFailure((n, throwable) -> transitionToConsumerAgreeing(n))
+                .onSuccess((n, result) -> transitionToAccepted(n))
+                .onFailure((n, throwable) -> transitionToAccepting(n))
                 .onRetryExhausted((n, throwable) -> transitionToTerminating(n, format("Failed to send %s to provider: %s", request.getClass().getSimpleName(), throwable.getMessage())))
                 .execute("[consumer] send agreement");
     }
 
     /**
-     * Processes {@link ContractNegotiation} in state PROVIDER_AGREED. For the deprecated ids-protocol, it's transitioned
-     * to PROVIDER_FINALIZED, otherwise to CONSUMER_VERIFYING to make the verification process start.
+     * Processes {@link ContractNegotiation} in state AGREED. For the deprecated ids-protocol, it's transitioned
+     * to FINALIZED, otherwise to VERIFYING to make the verification process start.
      *
      * @return true if processed, false otherwise
      */
     @WithSpan
-    private boolean processProviderAgreed(ContractNegotiation negotiation) {
+    private boolean processAgreed(ContractNegotiation negotiation) {
         if ("ids-multipart".equals(negotiation.getProtocol())) {
-            transitionToProviderFinalized(negotiation);
+            transitionToFinalized(negotiation);
             return true;
         }
 
-        transitionToConsumerVerifying(negotiation);
+        transitionToVerifying(negotiation);
         return true;
     }
 
     /**
-     * Processes {@link ContractNegotiation} in state CONSUMER_VERIFYING. Verifies the Agreement and send the
-     * {@link ContractAgreementVerificationMessage} to the provider and transition the negotiation to the CONSUMER_VERIFIED
+     * Processes {@link ContractNegotiation} in state VERIFYING. Verifies the Agreement and send the
+     * {@link ContractAgreementVerificationMessage} to the provider and transition the negotiation to the VERIFIED
      * state.
      *
      * @return true if processed, false otherwise
      */
     @WithSpan
-    private boolean processConsumerVerifying(ContractNegotiation negotiation) {
+    private boolean processVerifying(ContractNegotiation negotiation) {
         var message = ContractAgreementVerificationMessage.Builder.newInstance()
                 .protocol(negotiation.getProtocol())
-                .connectorAddress(negotiation.getCounterPartyAddress())
-                .correlationId(negotiation.getId())
+                .callbackAddress(negotiation.getCounterPartyAddress())
+                .processId(negotiation.getId())
                 .build();
 
         return entityRetryProcessFactory.doAsyncProcess(negotiation, () -> dispatcherRegistry.send(Object.class, message))
                 .entityRetrieve(negotiationStore::findById)
                 .onDelay(this::breakLease)
-                .onSuccess((n, result) -> transitionToConsumerVerified(n))
-                .onFailure((n, throwable) -> transitionToConsumerVerifying(n))
+                .onSuccess((n, result) -> transitionToVerified(n))
+                .onFailure((n, throwable) -> transitionToVerifying(n))
                 .onRetryExhausted((n, throwable) -> transitionToTerminating(n, format("Failed to send %s to provider: %s", message.getClass().getSimpleName(), throwable.getMessage())))
                 .execute(format("[consumer] send %s", message.getClass().getSimpleName()));
     }
@@ -341,11 +254,11 @@ public class ConsumerContractNegotiationManagerImpl extends AbstractContractNego
      */
     @WithSpan
     private boolean processTerminating(ContractNegotiation negotiation) {
-        var rejection = ContractRejection.Builder.newInstance()
+        var rejection = ContractNegotiationTerminationMessage.Builder.newInstance()
                 .protocol(negotiation.getProtocol())
                 .connectorId(negotiation.getCounterPartyId())
-                .connectorAddress(negotiation.getCounterPartyAddress())
-                .correlationId(negotiation.getId())
+                .callbackAddress(negotiation.getCounterPartyAddress())
+                .processId(negotiation.getId())
                 .rejectionReason(negotiation.getErrorDetail())
                 .build();
 

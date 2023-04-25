@@ -29,6 +29,15 @@ jobs:
       - name: Run Checkstyle
         run: ./gradlew checkstyleMain checkstyleTest checkstyleTestFixtures
 
+  Javadoc:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: ./.github/actions/setup-build
+
+      - name: Run Javadoc
+        run: ./gradlew javadoc
+
   Dependency-analysis:
     runs-on: ubuntu-latest
     steps:
@@ -326,13 +335,6 @@ jobs:
   #          command: |
   #            ./gradlew -p extensions/data-plane/data-plane-azure-data-factory test -DincludeTags="AzureDataFactoryIntegrationTest"
   #            ./gradlew -p system-tests/azure-data-factory-tests test -DincludeTags="AzureDataFactoryIntegrationTest"
-  #
-  #      - name: "Publish Gatling report"
-  #        uses: actions/upload-artifact@v3
-  #        if: always()
-  #        with:
-  #          name: Gatling reports
-  #          path: '**/build/reports/gatling/**'
 
   Upload-Test-Report:
     needs:

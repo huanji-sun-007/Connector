@@ -18,7 +18,7 @@ package org.eclipse.edc.connector.contract.validation;
 
 import org.eclipse.edc.connector.contract.policy.PolicyEquality;
 import org.eclipse.edc.connector.contract.spi.ContractId;
-import org.eclipse.edc.connector.contract.spi.offer.ContractDefinitionService;
+import org.eclipse.edc.connector.contract.spi.offer.ContractDefinitionResolver;
 import org.eclipse.edc.connector.contract.spi.types.agreement.ContractAgreement;
 import org.eclipse.edc.connector.contract.spi.types.negotiation.ContractNegotiation;
 import org.eclipse.edc.connector.contract.spi.types.offer.ContractOffer;
@@ -34,6 +34,7 @@ import org.jetbrains.annotations.NotNull;
 import java.net.URI;
 import java.time.Clock;
 import java.time.temporal.ChronoUnit;
+import java.util.HashMap;
 
 import static java.lang.String.format;
 
@@ -43,7 +44,7 @@ import static java.lang.String.format;
 public class ContractValidationServiceImpl implements ContractValidationService {
 
     private final ParticipantAgentService agentService;
-    private final ContractDefinitionService contractDefinitionService;
+    private final ContractDefinitionResolver contractDefinitionResolver;
     private final AssetIndex assetIndex;
     private final PolicyDefinitionStore policyStore;
     private final PolicyEngine policyEngine;
@@ -51,14 +52,14 @@ public class ContractValidationServiceImpl implements ContractValidationService 
     private final Clock clock;
 
     public ContractValidationServiceImpl(ParticipantAgentService agentService,
-                                         ContractDefinitionService contractDefinitionService,
+                                         ContractDefinitionResolver contractDefinitionResolver,
                                          AssetIndex assetIndex,
                                          PolicyDefinitionStore policyStore,
                                          PolicyEngine policyEngine,
                                          PolicyEquality policyEquality,
                                          Clock clock) {
         this.agentService = agentService;
-        this.contractDefinitionService = contractDefinitionService;
+        this.contractDefinitionResolver = contractDefinitionResolver;
         this.assetIndex = assetIndex;
         this.policyStore = policyStore;
         this.policyEngine = policyEngine;
@@ -85,7 +86,7 @@ public class ContractValidationServiceImpl implements ContractValidationService 
             return Result.failure("Invalid consumer identity");
         }
 
-        var contractDefinition = contractDefinitionService.definitionFor(agent, contractId.definitionPart());
+        var contractDefinition = contractDefinitionResolver.definitionFor(agent, contractId.definitionPart());
         if (contractDefinition == null) {
             return Result.failure(
                     "The ContractDefinition with id %s either does not exist or the access to it is not granted.");
@@ -122,7 +123,7 @@ public class ContractValidationServiceImpl implements ContractValidationService 
                 .provider(offer.getProvider())
                 .policy(contractPolicyDef.getPolicy())
                 .contractStart(offer.getContractStart())
-                .contractEnd(offer.getContractStart().plusSeconds(contractDefinition.getValidity()))
+                .contractEnd(offer.getContractEnd())
                 .build();
 
         return Result.success(validatedOffer);
@@ -146,7 +147,11 @@ public class ContractValidationServiceImpl implements ContractValidationService 
             return Result.failure("Invalid provider credentials");
         }
 
-        var policyResult = policyEngine.evaluate(NEGOTIATION_SCOPE, agreement.getPolicy(), agent);
+        // Create additional context information for policy engine to make agreement available in context
+        var contextInformation = new HashMap<Class, Object>();
+        contextInformation.put(ContractAgreement.class, agreement);
+
+        var policyResult = policyEngine.evaluate(NEGOTIATION_SCOPE, agreement.getPolicy(), agent, contextInformation);
         if (!policyResult.succeeded()) {
             return Result.failure(format("Policy does not fulfill the agreement %s, policy evaluation %s", agreement.getId(), policyResult.getFailureDetail()));
         }
@@ -164,6 +169,10 @@ public class ContractValidationServiceImpl implements ContractValidationService 
     @Override
     @NotNull
     public Result<Void> validateConfirmed(ClaimToken token, ContractAgreement agreement, ContractOffer latestOffer) {
+        if (latestOffer == null) {
+            return Result.failure("No offer found");
+        }
+
         var contractId = ContractId.parse(agreement.getId());
         if (!contractId.isValid()) {
             return Result.failure(format("ContractId %s does not follow the expected schema.", agreement.getId()));

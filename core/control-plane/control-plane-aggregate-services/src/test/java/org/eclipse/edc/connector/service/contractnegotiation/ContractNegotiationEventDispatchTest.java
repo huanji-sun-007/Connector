@@ -14,14 +14,19 @@
 
 package org.eclipse.edc.connector.service.contractnegotiation;
 
+import org.eclipse.edc.catalog.spi.DataService;
+import org.eclipse.edc.connector.contract.spi.event.contractnegotiation.ContractNegotiationAgreed;
+import org.eclipse.edc.connector.contract.spi.event.contractnegotiation.ContractNegotiationEvent;
+import org.eclipse.edc.connector.contract.spi.event.contractnegotiation.ContractNegotiationRequested;
 import org.eclipse.edc.connector.contract.spi.negotiation.NegotiationWaitStrategy;
-import org.eclipse.edc.connector.contract.spi.negotiation.ProviderContractNegotiationManager;
 import org.eclipse.edc.connector.contract.spi.offer.store.ContractDefinitionStore;
-import org.eclipse.edc.connector.contract.spi.types.negotiation.ContractOfferRequest;
+import org.eclipse.edc.connector.contract.spi.types.negotiation.ContractRequestMessage;
 import org.eclipse.edc.connector.contract.spi.types.offer.ContractDefinition;
 import org.eclipse.edc.connector.contract.spi.types.offer.ContractOffer;
+import org.eclipse.edc.connector.dataplane.selector.spi.store.DataPlaneInstanceStore;
 import org.eclipse.edc.connector.policy.spi.PolicyDefinition;
 import org.eclipse.edc.connector.policy.spi.store.PolicyDefinitionStore;
+import org.eclipse.edc.connector.spi.contractnegotiation.ContractNegotiationProtocolService;
 import org.eclipse.edc.junit.extensions.EdcExtension;
 import org.eclipse.edc.policy.model.Policy;
 import org.eclipse.edc.spi.agent.ParticipantAgentService;
@@ -29,9 +34,6 @@ import org.eclipse.edc.spi.asset.AssetIndex;
 import org.eclipse.edc.spi.asset.AssetSelectorExpression;
 import org.eclipse.edc.spi.event.EventRouter;
 import org.eclipse.edc.spi.event.EventSubscriber;
-import org.eclipse.edc.spi.event.contractnegotiation.ContractNegotiationConsumerRequested;
-import org.eclipse.edc.spi.event.contractnegotiation.ContractNegotiationEvent;
-import org.eclipse.edc.spi.event.contractnegotiation.ContractNegotiationProviderAgreed;
 import org.eclipse.edc.spi.iam.ClaimToken;
 import org.eclipse.edc.spi.message.RemoteMessageDispatcher;
 import org.eclipse.edc.spi.message.RemoteMessageDispatcherRegistry;
@@ -62,12 +64,9 @@ import static org.mockito.Mockito.when;
 class ContractNegotiationEventDispatchTest {
     private static final String CONSUMER = "consumer";
     private static final String PROVIDER = "provider";
-
     private static final long CONTRACT_VALIDITY = TimeUnit.HOURS.toSeconds(1);
 
-    @SuppressWarnings("rawtypes")
     private final EventSubscriber eventSubscriber = mock(EventSubscriber.class);
-
     private final ClaimToken token = ClaimToken.Builder.newInstance().claim(ParticipantAgentService.DEFAULT_IDENTITY_CLAIM_KEY, CONSUMER).build();
 
     @BeforeEach
@@ -79,18 +78,19 @@ class ContractNegotiationEventDispatchTest {
                 "edc.negotiation.provider.send.retry.limit", "0"
         ));
         extension.registerServiceMock(NegotiationWaitStrategy.class, () -> 1);
+        extension.registerServiceMock(DataService.class, mock(DataService.class));
+        extension.registerServiceMock(DataPlaneInstanceStore.class, mock(DataPlaneInstanceStore.class));
     }
 
     @Test
     void shouldDispatchEventsOnProviderContractNegotiationStateChanges(EventRouter eventRouter,
                                                                        RemoteMessageDispatcherRegistry dispatcherRegistry,
-                                                                       ProviderContractNegotiationManager manager,
+                                                                       ContractNegotiationProtocolService service,
                                                                        ContractDefinitionStore contractDefinitionStore,
                                                                        PolicyDefinitionStore policyDefinitionStore,
                                                                        AssetIndex assetIndex) {
         dispatcherRegistry.register(succeedingDispatcher());
 
-        //noinspection unchecked
         eventRouter.register(ContractNegotiationEvent.class, eventSubscriber);
         var policy = Policy.Builder.newInstance().build();
         var contractDefinition = ContractDefinition.Builder.newInstance()
@@ -104,17 +104,15 @@ class ContractNegotiationEventDispatchTest {
         policyDefinitionStore.create(PolicyDefinition.Builder.newInstance().id("policyId").policy(policy).build());
         assetIndex.accept(Asset.Builder.newInstance().id("assetId").build(), DataAddress.Builder.newInstance().type("any").build());
 
-        var result = manager.requested(token, createContractOfferRequest(policy));
+        service.notifyRequested(createContractOfferRequest(policy), token);
 
         await().untilAsserted(() -> {
-            //noinspection unchecked
-            verify(eventSubscriber).on(argThat(isEnvelopeOf(ContractNegotiationConsumerRequested.class)));
-            //noinspection unchecked
-            verify(eventSubscriber).on(argThat(isEnvelopeOf(ContractNegotiationProviderAgreed.class)));
+            verify(eventSubscriber).on(argThat(isEnvelopeOf(ContractNegotiationRequested.class)));
+            verify(eventSubscriber).on(argThat(isEnvelopeOf(ContractNegotiationAgreed.class)));
         });
     }
 
-    private ContractOfferRequest createContractOfferRequest(Policy policy) {
+    private ContractRequestMessage createContractOfferRequest(Policy policy) {
         var now = ZonedDateTime.now();
         var contractOffer = ContractOffer.Builder.newInstance()
                 .id("contractDefinitionId:" + UUID.randomUUID())
@@ -126,12 +124,12 @@ class ContractNegotiationEventDispatchTest {
                 .contractEnd(now.plusSeconds(CONTRACT_VALIDITY))
                 .build();
 
-        return ContractOfferRequest.Builder.newInstance()
+        return ContractRequestMessage.Builder.newInstance()
                 .protocol("test")
                 .connectorId("connectorId")
-                .connectorAddress("connectorAddress")
+                .callbackAddress("callbackAddress")
                 .contractOffer(contractOffer)
-                .correlationId("correlationId")
+                .processId("processId")
                 .build();
     }
 

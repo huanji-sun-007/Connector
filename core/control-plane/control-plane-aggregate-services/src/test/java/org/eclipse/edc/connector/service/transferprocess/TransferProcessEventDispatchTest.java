@@ -15,11 +15,15 @@
 
 package org.eclipse.edc.connector.service.transferprocess;
 
+import org.eclipse.edc.catalog.spi.DataService;
 import org.eclipse.edc.connector.core.event.EventExecutorServiceContainer;
+import org.eclipse.edc.connector.dataplane.selector.spi.store.DataPlaneInstanceStore;
+import org.eclipse.edc.connector.spi.transferprocess.TransferProcessProtocolService;
 import org.eclipse.edc.connector.spi.transferprocess.TransferProcessService;
 import org.eclipse.edc.connector.transfer.spi.retry.TransferWaitStrategy;
 import org.eclipse.edc.connector.transfer.spi.types.DataRequest;
 import org.eclipse.edc.connector.transfer.spi.types.TransferRequest;
+import org.eclipse.edc.connector.transfer.spi.types.protocol.TransferStartMessage;
 import org.eclipse.edc.junit.extensions.EdcExtension;
 import org.eclipse.edc.spi.event.EventRouter;
 import org.eclipse.edc.spi.event.EventSubscriber;
@@ -31,6 +35,7 @@ import org.eclipse.edc.spi.event.transferprocess.TransferProcessProvisioned;
 import org.eclipse.edc.spi.event.transferprocess.TransferProcessRequested;
 import org.eclipse.edc.spi.event.transferprocess.TransferProcessStarted;
 import org.eclipse.edc.spi.event.transferprocess.TransferProcessTerminated;
+import org.eclipse.edc.spi.iam.ClaimToken;
 import org.eclipse.edc.spi.message.RemoteMessageDispatcher;
 import org.eclipse.edc.spi.message.RemoteMessageDispatcherRegistry;
 import org.junit.jupiter.api.BeforeEach;
@@ -38,6 +43,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 
 import java.util.Map;
+import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 
 import static java.util.concurrent.CompletableFuture.failedFuture;
@@ -68,10 +74,13 @@ public class TransferProcessEventDispatchTest {
         extension.setConfiguration(configuration);
         extension.registerServiceMock(TransferWaitStrategy.class, () -> 1);
         extension.registerServiceMock(EventExecutorServiceContainer.class, new EventExecutorServiceContainer(newSingleThreadExecutor()));
+        extension.registerServiceMock(DataService.class, mock(DataService.class));
+        extension.registerServiceMock(DataPlaneInstanceStore.class, mock(DataPlaneInstanceStore.class));
     }
 
     @Test
-    void shouldDispatchEventsOnTransferProcessStateChanges(TransferProcessService service, EventRouter eventRouter, RemoteMessageDispatcherRegistry dispatcherRegistry) {
+    void shouldDispatchEventsOnTransferProcessStateChanges(TransferProcessService service, TransferProcessProtocolService protocolService,
+                                                           EventRouter eventRouter, RemoteMessageDispatcherRegistry dispatcherRegistry) {
         var testDispatcher = mock(RemoteMessageDispatcher.class);
         when(testDispatcher.protocol()).thenReturn("test");
         when(testDispatcher.send(any(), any())).thenReturn(CompletableFuture.completedFuture("any"));
@@ -101,7 +110,8 @@ public class TransferProcessEventDispatchTest {
             verify(eventSubscriber).on(argThat(isEnvelopeOf(TransferProcessRequested.class)));
         });
 
-        service.notifyStarted("dataRequestId");
+        var startMessage = TransferStartMessage.Builder.newInstance().processId("dataRequestId").protocol("any").callbackAddress("http://any").build();
+        protocolService.notifyStarted(startMessage, ClaimToken.Builder.newInstance().build());
 
         await().untilAsserted(() -> {
             verify(eventSubscriber).on(argThat(isEnvelopeOf(TransferProcessStarted.class)));
@@ -129,6 +139,7 @@ public class TransferProcessEventDispatchTest {
         eventRouter.register(TransferProcessEvent.class, eventSubscriber);
 
         var dataRequest = DataRequest.Builder.newInstance()
+                .id(String.valueOf(UUID.randomUUID()))
                 .assetId("assetId")
                 .destinationType("any")
                 .protocol("test")
@@ -156,6 +167,7 @@ public class TransferProcessEventDispatchTest {
         eventRouter.register(TransferProcessEvent.class, eventSubscriber);
 
         var dataRequest = DataRequest.Builder.newInstance()
+                .id(String.valueOf(UUID.randomUUID()))
                 .assetId("assetId")
                 .destinationType("any")
                 .protocol("test")

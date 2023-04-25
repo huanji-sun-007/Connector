@@ -14,17 +14,19 @@
 
 package org.eclipse.edc.connector.api.management.contractnegotiation.transform;
 
+import org.eclipse.edc.api.model.CallbackAddressDto;
 import org.eclipse.edc.connector.api.management.contractnegotiation.model.NegotiationInitiateRequestDto;
 import org.eclipse.edc.transform.spi.TransformerContext;
 import org.junit.jupiter.api.Test;
 
 import java.time.Clock;
 import java.time.Instant;
+import java.util.List;
 
 import static java.time.ZoneOffset.UTC;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.eclipse.edc.connector.api.management.contractnegotiation.TestFunctions.createOffer;
-import static org.eclipse.edc.connector.contract.spi.types.negotiation.ContractOfferRequest.Type.INITIAL;
+import static org.eclipse.edc.connector.contract.spi.types.negotiation.ContractRequestMessage.Type.INITIAL;
 import static org.mockito.Mockito.mock;
 
 class NegotiationInitiateRequestDtoToDataRequestTransformerTest {
@@ -32,7 +34,9 @@ class NegotiationInitiateRequestDtoToDataRequestTransformerTest {
     private static final String DEFAULT_CONSUMER_ID = "urn:connector:test-consumer";
     private final Instant now = Instant.now();
     private final Clock clock = Clock.fixed(now, UTC);
+
     private final NegotiationInitiateRequestDtoToDataRequestTransformer transformer = new NegotiationInitiateRequestDtoToDataRequestTransformer(clock, DEFAULT_CONSUMER_ID);
+
     private final TransformerContext context = mock(TransformerContext.class);
 
     @Test
@@ -43,6 +47,9 @@ class NegotiationInitiateRequestDtoToDataRequestTransformerTest {
 
     @Test
     void verify_transform() {
+        var callback = CallbackAddressDto.Builder.newInstance()
+                .uri("local://test")
+                .build();
         var dto = NegotiationInitiateRequestDto.Builder.newInstance()
                 .connectorId("connectorId")
                 .connectorAddress("address")
@@ -50,13 +57,14 @@ class NegotiationInitiateRequestDtoToDataRequestTransformerTest {
                 .consumerId("test-consumer")
                 .providerId("test-provider")
                 .offer(createOffer("offerId", "assetId"))
+                .callbackAddresses(List.of(callback))
                 .build();
 
         var request = transformer.transform(dto, context);
 
         assertThat(request).isNotNull();
         assertThat(request.getConnectorId()).isEqualTo("connectorId");
-        assertThat(request.getConnectorAddress()).isEqualTo("address");
+        assertThat(request.getCallbackAddress()).isEqualTo("address");
         assertThat(request.getProtocol()).isEqualTo("protocol");
         assertThat(request.getType()).isEqualTo(INITIAL);
         assertThat(request.getContractOffer().getId()).isEqualTo("offerId");

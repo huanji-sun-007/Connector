@@ -17,7 +17,6 @@ package org.eclipse.edc.connector.transfer.spi.types.protocol;
 import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.databind.annotation.JsonPOJOBuilder;
 import org.eclipse.edc.spi.types.domain.DataAddress;
-import org.eclipse.edc.spi.types.domain.message.RemoteMessage;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -26,14 +25,16 @@ import java.util.Objects;
 /**
  * The {@link TransferRequestMessage} is sent by a consumer to initiate a transfer process.
  */
-public class TransferRequestMessage implements RemoteMessage {
+public class TransferRequestMessage implements TransferRemoteMessage {
 
-    private String connectorAddress;
+    private String callbackAddress;
     private String protocol;
     private String id;
     private String contractId;
+    @Deprecated(forRemoval = true)
     private String assetId;
     private DataAddress dataDestination;
+    @Deprecated(forRemoval = true)
     private String connectorId;
     private Map<String, String> properties = new HashMap<>();
 
@@ -43,10 +44,16 @@ public class TransferRequestMessage implements RemoteMessage {
     }
 
     @Override
-    public String getConnectorAddress() {
-        return connectorAddress;
+    public String getCallbackAddress() {
+        return callbackAddress;
     }
 
+    @Override
+    public String getProcessId() {
+        return id;
+    }
+
+    @Deprecated
     public String getAssetId() {
         return assetId;
     }
@@ -59,6 +66,7 @@ public class TransferRequestMessage implements RemoteMessage {
         return id;
     }
 
+    @Deprecated
     public String getConnectorId() {
         return connectorId;
     }
@@ -89,8 +97,8 @@ public class TransferRequestMessage implements RemoteMessage {
             return this;
         }
 
-        public Builder connectorAddress(String address) {
-            message.connectorAddress = address;
+        public Builder callbackAddress(String callbackAddress) {
+            message.callbackAddress = callbackAddress;
             return this;
         }
 
@@ -104,6 +112,7 @@ public class TransferRequestMessage implements RemoteMessage {
             return this;
         }
 
+        @Deprecated
         public Builder assetId(String assetId) {
             message.assetId = assetId;
             return this;
@@ -114,6 +123,7 @@ public class TransferRequestMessage implements RemoteMessage {
             return this;
         }
 
+        @Deprecated
         public Builder connectorId(String connectorId) {
             message.connectorId = connectorId;
             return this;
@@ -126,7 +136,7 @@ public class TransferRequestMessage implements RemoteMessage {
 
         public TransferRequestMessage build() {
             Objects.requireNonNull(message.protocol, "The protocol must be specified");
-            Objects.requireNonNull(message.connectorAddress, "The connectorAddress must be specified");
+            Objects.requireNonNull(message.callbackAddress, "The callbackAddress must be specified");
             return message;
         }
     }

@@ -168,21 +168,16 @@ public class TransferProcessManagerImpl implements TransferProcessManager, Provi
     @Override
     public StatusResult<String> initiateConsumerRequest(TransferRequest transferRequest) {
         return initiateRequest(CONSUMER, transferRequest);
-
-    }
-
-    /**
-     * Initiate a provider request TransferProcess.
-     */
-    @WithSpan
-    @Override
-    public StatusResult<String> initiateProviderRequest(TransferRequest transferRequest) {
-        return initiateRequest(PROVIDER, transferRequest);
     }
 
     @Override
     public void enqueueCommand(TransferProcessCommand command) {
         commandQueue.enqueue(command);
+    }
+
+    @Override
+    public Result<Void> runCommand(TransferProcessCommand command) {
+        return commandRunner.runCommand(command);
     }
 
     @Override
@@ -272,6 +267,7 @@ public class TransferProcessManagerImpl implements TransferProcessManager, Provi
                 .type(type)
                 .clock(clock)
                 .properties(dataRequest.getProperties())
+                .callbackAddresses(transferRequest.getCallbackAddresses())
                 .traceContext(telemetry.getCurrentTraceContext())
                 .build();
 
@@ -384,15 +380,15 @@ public class TransferProcessManagerImpl implements TransferProcessManager, Provi
         var message = TransferRequestMessage.Builder.newInstance()
                 .id(dataRequest.getId())
                 .protocol(dataRequest.getProtocol())
-                .connectorAddress(dataRequest.getConnectorAddress())
                 .connectorId(dataRequest.getConnectorId())
+                .callbackAddress(dataRequest.getConnectorAddress())
                 .dataDestination(dataRequest.getDataDestination())
                 .properties(dataRequest.getProperties())
                 .assetId(dataRequest.getAssetId())
                 .contractId(dataRequest.getContractId())
                 .build();
 
-        var description = format("Send %s to %s", message.getClass().getSimpleName(), message.getConnectorAddress());
+        var description = format("Send %s to %s", message.getClass().getSimpleName(), message.getCallbackAddress());
         return entityRetryProcessFactory.doAsyncProcess(process, () -> dispatcherRegistry.send(Object.class, message))
                 .entityRetrieve(id -> transferProcessStore.find(id))
                 .onSuccess((t, content) -> transitionToRequested(t))
@@ -460,7 +456,8 @@ public class TransferProcessManagerImpl implements TransferProcessManager, Provi
         var dataRequest = process.getDataRequest();
         var message = TransferStartMessage.Builder.newInstance()
                 .protocol(dataRequest.getProtocol())
-                .connectorAddress(dataRequest.getConnectorAddress()) // TODO: is this correct? it shouldn't be for provider.
+                .callbackAddress(dataRequest.getConnectorAddress()) // TODO: is this correct? it shouldn't be for provider.
+                .processId(dataRequest.getId())
                 .build();
 
         var description = format("Send %s to %s", dataRequest.getClass().getSimpleName(), dataRequest.getConnectorAddress());
@@ -528,7 +525,8 @@ public class TransferProcessManagerImpl implements TransferProcessManager, Provi
         var dataRequest = process.getDataRequest();
         var message = TransferCompletionMessage.Builder.newInstance()
                 .protocol(dataRequest.getProtocol())
-                .connectorAddress(dataRequest.getConnectorAddress())
+                .callbackAddress(dataRequest.getConnectorAddress())
+                .processId(dataRequest.getId())
                 .build();
 
         var description = format("Send %s to %s", dataRequest.getClass().getSimpleName(), dataRequest.getConnectorAddress());
@@ -557,8 +555,9 @@ public class TransferProcessManagerImpl implements TransferProcessManager, Provi
 
         var dataRequest = process.getDataRequest();
         var message = TransferTerminationMessage.Builder.newInstance()
-                .connectorAddress(dataRequest.getConnectorAddress())
+                .callbackAddress(dataRequest.getConnectorAddress())
                 .protocol(dataRequest.getProtocol())
+                .processId(dataRequest.getId())
                 .build();
 
         var description = format("Send %s to %s", dataRequest.getClass().getSimpleName(), dataRequest.getConnectorAddress());

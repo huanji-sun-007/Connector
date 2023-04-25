@@ -37,28 +37,19 @@ dependencyResolutionManagement {
         }
         mavenCentral()
     }
-    versionCatalogs {
-        create("libs") {
-            from("org.eclipse.edc:edc-versions:0.0.1-SNAPSHOT")
-            // this is not part of the published EDC Version Catalog, so we'll just "amend" it
-            library("dnsOverHttps", "com.squareup.okhttp3", "okhttp-dnsoverhttps").versionRef("okhttp")
-            library("titaniumJsonLd", "com.apicatalog", "titanium-json-ld").version("1.3.1")
-            library("jacksonJsonP", "com.fasterxml.jackson.datatype", "jackson-datatype-jakarta-jsonp").version("jackson")
-            library("jakartaJson", "org.glassfish", "jakarta.json").version("2.0.0")
-        }
-    }
 }
 
 // EDC core modules --------------------------------------------------------------------------------
-include(":core:common:connector-core")
 include(":core:common:boot")
+include(":core:common:connector-core")
+include(":core:common:junit")
 include(":core:common:jwt-core")
 include(":core:common:policy-engine")
 include(":core:common:policy-evaluator")
 include(":core:common:state-machine")
 include(":core:common:util")
-include(":core:common:junit")
 
+include(":core:control-plane:catalog-core")
 include(":core:control-plane:contract-core")
 include(":core:control-plane:control-plane-core")
 include(":core:control-plane:control-plane-aggregate-services")
@@ -71,6 +62,21 @@ include(":core:data-plane:data-plane-framework")
 include(":core:data-plane-selector:data-plane-selector-core")
 
 // modules that provide implementations for data ingress/egress ------------------------------------
+include(":data-protocols:dsp:dsp-api-configuration")
+include(":data-protocols:dsp:dsp-catalog:dsp-catalog-api")
+include(":data-protocols:dsp:dsp-catalog:dsp-catalog-http-dispatcher")
+include(":data-protocols:dsp:dsp-catalog:dsp-catalog-spi")
+include(":data-protocols:dsp:dsp-catalog:dsp-catalog-transform")
+include(":data-protocols:dsp:dsp-transfer-process:dsp-transfer-process-transform")
+include(":data-protocols:dsp:dsp-negotiation:dsp-negotiation-api")
+include(":data-protocols:dsp:dsp-negotiation:dsp-negotiation-spi")
+include(":data-protocols:dsp:dsp-negotiation:dsp-negotiation-transform")
+include(":data-protocols:dsp:dsp-http-core")
+include(":data-protocols:dsp:dsp-http-spi")
+include(":data-protocols:dsp:dsp-transform")
+include(":data-protocols:dsp:dsp-transfer-process:dsp-transfer-process-api")
+include(":data-protocols:dsp:dsp-transfer-process:dsp-transfer-process-spi")
+
 include(":data-protocols:ids:ids-api-configuration")
 include(":data-protocols:ids:ids-api-multipart-endpoint-v1")
 include(":data-protocols:ids:ids-api-multipart-dispatcher-v1")
@@ -159,6 +165,9 @@ include(":extensions:control-plane:store:sql:contract-negotiation-store-sql")
 include(":extensions:control-plane:store:sql:control-plane-sql")
 include(":extensions:control-plane:store:sql:policy-definition-store-sql")
 include(":extensions:control-plane:store:sql:transfer-process-store-sql")
+include(":extensions:control-plane:callback:callback-event-dispatcher")
+include(":extensions:control-plane:callback:callback-http-dispatcher")
+
 
 include(":extensions:data-plane:data-plane-api")
 include(":extensions:data-plane:data-plane-client")
@@ -179,6 +188,7 @@ include(":extensions:data-plane-selector:data-plane-selector-client")
 include(":extensions:data-plane-selector:store:sql:data-plane-instance-store-sql")
 include(":extensions:data-plane-selector:store:cosmos:data-plane-instance-store-cosmos")
 
+
 // modules for launchers, i.e. runnable compositions of the app ------------------------------------
 include(":launchers:data-plane-server")
 include(":launchers:dpf-selector")
@@ -187,16 +197,17 @@ include(":launchers:data-factory-sample:provider")
 include(":launchers:data-factory-sample:consumer")
 
 // extension points for a connector ----------------------------------------------------------------
+include(":spi:common:aggregate-service-spi")
 include(":spi:common:auth-spi")
 include(":spi:common:catalog-spi")
 include(":spi:common:core-spi")
-include(":spi:common:identity-did-spi")
 include(":spi:common:http-spi")
+include(":spi:common:identity-did-spi")
+include(":spi:common:json-ld-spi")
 include(":spi:common:jwt-spi")
 include(":spi:common:oauth2-spi")
 include(":spi:common:policy-engine-spi")
 include(":spi:common:policy-model")
-include(":spi:common:aggregate-service-spi")
 include(":spi:common:transaction-datasource-spi")
 include(":spi:common:transaction-spi")
 include(":spi:common:transform-spi")
@@ -230,5 +241,6 @@ include(":system-tests:runtimes:azure-storage-transfer-provider")
 include(":system-tests:runtimes:file-transfer-consumer")
 include(":system-tests:runtimes:file-transfer-provider")
 include(":system-tests:tests")
+include(":version-catalog")
 include("extensions:common:azure:ms-dataverse")
 findProject(":extensions:common:azure:ms-dataverse")?.name = "ms-dataverse"
