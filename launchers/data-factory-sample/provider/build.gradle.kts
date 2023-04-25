@@ -24,7 +24,7 @@ dependencies {
     //Transfer Data
     implementation("$groupId:data-plane-core:$edcVersion")
     implementation("$groupId:azure-resource-manager:$edcVersion")
-    implementation(project(":Connector:extensions:data-plane:data-plane-azure-data-factory"))
+    implementation(project(":extensions:data-plane:data-plane-azure-data-factory"))
 
     implementation("$groupId:data-plane-selector-client:$edcVersion")
     implementation("$groupId:data-plane-selector-core:$edcVersion")
@@ -38,8 +38,5 @@ application {
 tasks.withType<com.github.jengelman.gradle.plugins.shadow.tasks.ShadowJar> {
     exclude("**/pom.properties", "**/pom.xm")
     mergeServiceFiles()
-    dependsOn(":provider:jar")
-    dependsOn(":provider:distTar")
-    dependsOn(":provider:distZip")
     archiveFileName.set("provider.jar")
 }
